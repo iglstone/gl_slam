@@ -1,0 +1,21 @@
+<?xml version="1.0"?>
+<package>
+  <name>gl_gmapping</name>
+  <version>0.1.0</version>
+  <description>The gl_gmapping package</description>
+    <author>GL</author>
+    <maintainer email="690193240@qq.com">gl</maintainer>
+    <license>CreativeCommons-by-nc-sa-2.0</license>
+    <url>http://ros.org/wiki/gmapping</url>
+    <buildtool_depend>catkin</buildtool_depend>
+    <build_depend>nav_msgs</build_depend>
+    <build_depend>openslam_gmapping</build_depend>
+    <build_depend>roscpp</build_depend>
+    <build_depend>rostest</build_depend>
+    <build_depend>tf</build_depend>
+
+    <run_depend>nav_msgs</run_depend>
+    <run_depend>openslam_gmapping</run_depend>
+    <run_depend>roscpp</run_depend>
+    <run_depend>tf</run_depend>
+</package>
