@@ -8,107 +8,18 @@
 /* Modified by: Charles DuHadway */
 
 
-/**
-
-@mainpage gl_gmapping
-
-@htmlinclude manifest.html
-
-@b gl_gmapping is a wrapper around the GMapping SLAM library. It reads laser
-scans and odometry and computes a map. This map can be
-written to a file using e.g.
-
-  "rosrun map_server map_saver static_map:=dynamic_map"
-
-<hr>
-
-@section topic ROS topics
-
-Subscribes to (name/type):
-- @b "scan"/<a href="../../sensor_msgs/html/classstd__msgs_1_1LaserScan.html">sensor_msgs/LaserScan</a> : data from a laser range scanner
-- @b "/tf": odometry from the robot
-
-
-Publishes to (name/type):
-- @b "/tf"/tf/tfMessage: position relative to the map
-
-
-@section services
- - @b "~dynamic_map" : returns the map
-
-
-@section parameters ROS parameters
-
-Reads the following parameters from the parameter server
-
-Parameters used by our GMapping wrapper:
-
-- @b "~throttle_scans": @b [int] throw away every nth laser scan
-- @b "~base_frame": @b [string] the tf frame_id to use for the robot base pose
-- @b "~map_frame": @b [string] the tf frame_id where the robot pose on the map is published
-- @b "~odom_frame": @b [string] the tf frame_id from which odometry is read
-- @b "~map_update_interval": @b [double] time in seconds between two recalculations of the map
-
-
-Parameters used by GMapping itself:
-
-Laser Parameters:
-- @b "~/maxRange" @b [double] maximum range of the laser scans. Rays beyond this range get discarded completely. (default: maximum laser range minus 1 cm, as received in the the first LaserScan message)
-- @b "~/maxUrange" @b [double] maximum range of the laser scanner that is used for map building (default: same as maxRange)
-- @b "~/sigma" @b [double] standard deviation for the scan matching process (cell)
-- @b "~/kernelSize" @b [int] search window for the scan matching process
-- @b "~/lstep" @b [double] initial search step for scan matching (linear)
-- @b "~/astep" @b [double] initial search step for scan matching (angular)
-- @b "~/iterations" @b [int] number of refinement steps in the scan matching. The final "precision" for the match is lstep*2^(-iterations) or astep*2^(-iterations), respectively.
-- @b "~/lsigma" @b [double] standard deviation for the scan matching process (single laser beam)
-- @b "~/ogain" @b [double] gain for smoothing the likelihood
-- @b "~/lskip" @b [int] take only every (n+1)th laser ray for computing a match (0 = take all rays)
-- @b "~/minimumScore" @b [double] minimum score for considering the outcome of the scanmatching good. Can avoid 'jumping' pose estimates in large open spaces when using laser scanners with limited range (e.g. 5m). (0 = default. Scores go up to 600+, try 50 for example when experiencing 'jumping' estimate issues)
-
-Motion Model Parameters (all standard deviations of a gaussian noise model)
-- @b "~/srr" @b [double] linear noise component (x and y)
-- @b "~/stt" @b [double] angular noise component (theta)
-- @b "~/srt" @b [double] linear -> angular noise component
-- @b "~/str" @b [double] angular -> linear noise component
-
-Others:
-- @b "~/linearUpdate" @b [double] the robot only processes new measurements if the robot has moved at least this many meters
-- @b "~/angularUpdate" @b [double] the robot only processes new measurements if the robot has turned at least this many rads
-
-- @b "~/resampleThreshold" @b [double] threshold at which the particles get resampled. Higher means more frequent resampling.
-- @b "~/particles" @b [int] (fixed) number of particles. Each particle represents a possible trajectory that the robot has traveled
-
-Likelihood sampling (used in scan matching)
-- @b "~/llsamplerange" @b [double] linear range
-- @b "~/lasamplerange" @b [double] linear step size
-- @b "~/llsamplestep" @b [double] linear range
-- @b "~/lasamplestep" @b [double] angular step size
-
-Initial map dimensions and resolution:
-- @b "~/xmin" @b [double] minimum x position in the map [m]
-- @b "~/ymin" @b [double] minimum y position in the map [m]
-- @b "~/xmax" @b [double] maximum x position in the map [m]
-- @b "~/ymax" @b [double] maximum y position in the map [m]
-- @b "~/delta" @b [double] size of one pixel [m]
-
-*/
-
 #include "gl_gmapping.h"
-
 #include <iostream>
-
 #include <time.h>
-
 #include "ros/ros.h"
 #include "ros/console.h"
 #include "nav_msgs/MapMetaData.h"
-
 #include "gmapping/sensor/sensor_range/rangesensor.h"
 #include "gmapping/sensor/sensor_odometry/odometrysensor.h"
-
 #include <rosbag/bag.h>
 #include <rosbag/view.h>
 #include <boost/foreach.hpp>
+
 #define foreach BOOST_FOREACH
 
 // compute linear index for given map coords
@@ -121,23 +32,6 @@ GlGmapping::GlGmapping():
   seed_ = time(NULL);
   init();
 }
-
-GlGmapping::GlGmapping(ros::NodeHandle& nh, ros::NodeHandle& pnh):
-  map_to_odom_(tf::Transform(tf::createQuaternionFromRPY( 0, 0, 0 ), tf::Point(0, 0, 0 ))),
-  laser_count_(0),node_(nh), private_nh_(pnh), scan_filter_sub_(NULL), scan_filter_(NULL), transform_thread_(NULL)
-{
-  seed_ = time(NULL);
-  init();
-}
-
-GlGmapping::GlGmapping(long unsigned int seed, long unsigned int max_duration_buffer):
-  map_to_odom_(tf::Transform(tf::createQuaternionFromRPY( 0, 0, 0 ), tf::Point(0, 0, 0 ))),
-  laser_count_(0), private_nh_("~"), scan_filter_sub_(NULL), scan_filter_(NULL), transform_thread_(NULL),
-  seed_(seed), tf_(ros::Duration(max_duration_buffer))
-{
-  init();
-}
-
 
 void GlGmapping::init()
 {
@@ -234,125 +128,137 @@ void GlGmapping::init()
 
 }
 
+//from main
 void GlGmapping::startLiveSlam()
 {
   entropy_publisher_ = private_nh_.advertise<std_msgs::Float64>("entropy", 1, true);
   sst_ = node_.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
   sstm_ = node_.advertise<nav_msgs::MapMetaData>("map_metadata", 1, true);
-  ss_ = node_.advertiseService("dynamic_map", &GlGmapping::mapCallback, this);
+  ss_ = node_.advertiseService("dynamic_map", &GlGmapping::mapServiceCallback, this);
+
+  //laser scan
   scan_filter_sub_ = new message_filters::Subscriber<sensor_msgs::LaserScan>(node_, "scan", 5);
   scan_filter_ = new tf::MessageFilter<sensor_msgs::LaserScan>(*scan_filter_sub_, tf_, odom_frame_, 5);
-  scan_filter_->registerCallback(boost::bind(&GlGmapping::laserCallback, this, _1));
+  scan_filter_->registerCallback(boost::bind(&GlGmapping::laserProcess, this, _1));
 
   transform_thread_ = new boost::thread(boost::bind(&GlGmapping::publishLoop, this, transform_publish_period_));
 }
 
-void GlGmapping::startReplay(const std::string & bag_fname, std::string scan_topic)
+//1)
+void GlGmapping::laserProcess(const sensor_msgs::LaserScan::ConstPtr& scan)
 {
-  double transform_publish_period;
-  ros::NodeHandle private_nh_("~");
-  entropy_publisher_ = private_nh_.advertise<std_msgs::Float64>("entropy", 1, true);
-  sst_ = node_.advertise<nav_msgs::OccupancyGrid>("map", 1, true);
-  sstm_ = node_.advertise<nav_msgs::MapMetaData>("map_metadata", 1, true);
-  ss_ = node_.advertiseService("dynamic_map", &GlGmapping::mapCallback, this);
-
-  rosbag::Bag bag;
-  bag.open(bag_fname, rosbag::bagmode::Read);
-
-  std::vector<std::string> topics;
-  topics.push_back(std::string("/tf"));
-  topics.push_back(scan_topic);
-  rosbag::View viewall(bag, rosbag::TopicQuery(topics));
-
-  // Store up to 5 messages and there error message (if they cannot be processed right away)
-  std::queue<std::pair<sensor_msgs::LaserScan::ConstPtr, std::string> > s_queue;
-  foreach(rosbag::MessageInstance const m, viewall)
-  {
-    tf::tfMessage::ConstPtr cur_tf = m.instantiate<tf::tfMessage>();
-    if (cur_tf != NULL) {
-      for (size_t i = 0; i < cur_tf->transforms.size(); ++i)
-      {
-        geometry_msgs::TransformStamped transformStamped;
-        tf::StampedTransform stampedTf;
-        transformStamped = cur_tf->transforms[i];
-        tf::transformStampedMsgToTF(transformStamped, stampedTf);
-        tf_.setTransform(stampedTf);
-      }
-    }
-
-    sensor_msgs::LaserScan::ConstPtr s = m.instantiate<sensor_msgs::LaserScan>();
-    if (s != NULL) {
-      if (!(ros::Time(s->header.stamp)).is_zero())
-      {
-        s_queue.push(std::make_pair(s, ""));
-      }
-      // Just like in live processing, only process the latest 5 scans
-      if (s_queue.size() > 5) {
-        ROS_WARN_STREAM("Dropping old scan: " << s_queue.front().second);
-        s_queue.pop();
-      }
-      // ignoring un-timestamped tf data
-    }
-
-    // Only process a scan if it has tf data
-    while (!s_queue.empty())
-    {
-      try
-      {
-        tf::StampedTransform t;
-        tf_.lookupTransform(s_queue.front().first->header.frame_id, odom_frame_, s_queue.front().first->header.stamp, t);
-        this->laserCallback(s_queue.front().first);
-        s_queue.pop();
-      }
-      // If tf does not have the data yet
-      catch(tf2::TransformException& e)
-      {
-        // Store the error to display it if we cannot process the data after some time
-        s_queue.front().second = std::string(e.what());
-        break;
-      }
-    }
-  }
-
-  bag.close();
-}
-
-void GlGmapping::publishLoop(double transform_publish_period){
-  if(transform_publish_period == 0)
+  laser_count_++;
+  if ((laser_count_ % throttle_scans_) != 0)
     return;
 
-  ros::Rate r(1.0 / transform_publish_period);
-  while(ros::ok()){
-    publishTransform();
-    r.sleep();
+  static ros::Time last_map_update(0,0);
+
+  // We can't initialize the mapper until we've got the first scan
+  if(!got_first_scan_)
+  {
+    if(!initMapper(*scan))
+      return;
+    got_first_scan_ = true;
   }
+
+  GMapping::OrientedPoint odom_pose;
+
+  if(addScan(*scan, odom_pose))
+  {
+    ROS_DEBUG("scan processed");
+
+    GMapping::OrientedPoint mpose = gsp_->getParticles()[gsp_->getBestParticleIndex()].pose;
+    ROS_DEBUG("new best pose: %.3f %.3f %.3f", mpose.x, mpose.y, mpose.theta);//laser scanmatch from map?
+    ROS_DEBUG("odom pose: %.3f %.3f %.3f", odom_pose.x, odom_pose.y, odom_pose.theta);//in odom fram , robot pose from odomtry
+    ROS_DEBUG("correction: %.3f %.3f %.3f", mpose.x - odom_pose.x, mpose.y - odom_pose.y, mpose.theta - odom_pose.theta);
+
+    tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, mpose.theta), tf::Vector3(mpose.x, mpose.y, 0.0)).inverse();
+    tf::Transform odom_to_laser = tf::Transform(tf::createQuaternionFromRPY(0, 0, odom_pose.theta), tf::Vector3(odom_pose.x, odom_pose.y, 0.0));
+
+    map_to_odom_mutex_.lock();
+    map_to_odom_ = (odom_to_laser * laser_to_map).inverse();
+    map_to_odom_mutex_.unlock();
+
+    //if update done or arrived at a new interval ,will update the map
+    if(!got_map_ || (scan->header.stamp - last_map_update) > map_update_interval_)
+    {
+      updateMap(*scan);
+      last_map_update = scan->header.stamp;
+      ROS_DEBUG("Updated the map");
+    }
+  } else
+    ROS_DEBUG("cannot process scan");
 }
 
-GlGmapping::~GlGmapping()
+//2)
+bool GlGmapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoint& gmap_pose)
 {
-  if(transform_thread_){
-    transform_thread_->join();
-    delete transform_thread_;
+  if(!getOdomPose(gmap_pose, scan.header.stamp))
+     return false;
+
+  if(scan.ranges.size() != gsp_laser_beam_count_)
+    return false;
+
+  // GMapping wants an array of doubles...
+  double* ranges_double = new double[scan.ranges.size()];
+  // If the angle increment is negative, we have to invert the order of the readings.
+  if (do_reverse_range_)
+  {
+    ROS_DEBUG("Inverting scan");
+    int num_ranges = scan.ranges.size();
+    for(int i=0; i < num_ranges; i++)
+    {
+      // Must filter out short readings, because the mapper won't
+      if(scan.ranges[num_ranges - i - 1] < scan.range_min)
+        ranges_double[i] = (double)scan.range_max;
+      else
+        ranges_double[i] = (double)scan.ranges[num_ranges - i - 1];
+    }
+  } else
+  {
+    for(unsigned int i=0; i < scan.ranges.size(); i++)
+    {
+      // Must filter out short readings, because the mapper won't
+      if(scan.ranges[i] < scan.range_min)
+        ranges_double[i] = (double)scan.range_max;
+      else
+        ranges_double[i] = (double)scan.ranges[i];
+    }
   }
 
-  delete gsp_;
-  if(gsp_laser_)
-    delete gsp_laser_;
-  if(gsp_odom_)
-    delete gsp_odom_;
-  if (scan_filter_)
-    delete scan_filter_;
-  if (scan_filter_sub_)
-    delete scan_filter_sub_;
+  GMapping::RangeReading reading(scan.ranges.size(),
+                                 ranges_double,
+                                 gsp_laser_,
+                                 scan.header.stamp.toSec());
+
+  // ...but it deep copies them in RangeReading constructor, so we don't
+  // need to keep our array around.
+  delete[] ranges_double;
+
+  reading.setPose(gmap_pose);//by now , gmap_pose is null *, will process in reading
+
+  /*
+  ROS_DEBUG("scanpose (%.3f): %.3f %.3f %.3f\n",
+            scan.header.stamp.toSec(),
+            gmap_pose.x,
+            gmap_pose.y,
+            gmap_pose.theta);
+            */
+  ROS_DEBUG("processing scan");
+
+  return gsp_->processScan(reading);
 }
 
-bool
-GlGmapping::getOdomPose(GMapping::OrientedPoint& gmap_pose, const ros::Time& t)
+//3)
+/*得到里程计的位姿 即激光雷达在里程计坐标系中的位姿*/
+bool GlGmapping::getOdomPose(GMapping::OrientedPoint& gmap_pose, const ros::Time& t)
 {
   // Get the pose of the centered laser at the right time
   centered_laser_pose_.stamp_ = t;
+
   // Get the laser's pose that is centered
   tf::Stamped<tf::Transform> odom_pose;
+
   try
   {
     tf_.transformPose(odom_frame_, centered_laser_pose_, odom_pose);
@@ -370,8 +276,29 @@ GlGmapping::getOdomPose(GMapping::OrientedPoint& gmap_pose, const ros::Time& t)
   return true;
 }
 
-bool
-GlGmapping::initMapper(const sensor_msgs::LaserScan& scan)
+/*计算位姿的信息熵*/
+double GlGmapping::computePoseEntropy()
+{
+  double weight_total=0.0;
+  for(std::vector<GMapping::GridSlamProcessor::Particle>::const_iterator it = gsp_->getParticles().begin();
+      it != gsp_->getParticles().end();
+      ++it)
+  {
+    weight_total += it->weight;
+  }
+  double entropy = 0.0;
+  for(std::vector<GMapping::GridSlamProcessor::Particle>::const_iterator it = gsp_->getParticles().begin();
+      it != gsp_->getParticles().end();
+      ++it)
+  {
+    if(it->weight/weight_total > 0.0)
+      entropy += it->weight/weight_total * log(it->weight/weight_total);
+  }
+  return -entropy;
+}
+
+//sth with gsp_ map
+bool GlGmapping::initMapper(const sensor_msgs::LaserScan& scan)
 {
   laser_frame_ = scan.header.frame_id;
   // Get the laser's pose, relative to base.
@@ -423,8 +350,8 @@ GlGmapping::initMapper(const sensor_msgs::LaserScan& scan)
   if (up.z() > 0)
   {
     do_reverse_range_ = scan.angle_min > scan.angle_max;
-    centered_laser_pose_ = tf::Stamped<tf::Pose>(tf::Transform(tf::createQuaternionFromRPY(0,0,angle_center),
-                                                               tf::Vector3(0,0,0)), ros::Time::now(), laser_frame_);
+    centered_laser_pose_ = tf::Stamped<tf::Pose>(tf::Transform(tf::createQuaternionFromRPY(0,0,angle_center),tf::Vector3(0,0,0)),
+                                                 ros::Time::now(), laser_frame_); //laser_frame = laser
     ROS_INFO("Laser is mounted upwards.");
   }
   else
@@ -515,135 +442,8 @@ GlGmapping::initMapper(const sensor_msgs::LaserScan& scan)
   return true;
 }
 
-bool
-GlGmapping::addScan(const sensor_msgs::LaserScan& scan, GMapping::OrientedPoint& gmap_pose)
+void GlGmapping::updateMap(const sensor_msgs::LaserScan& scan)
 {
-  if(!getOdomPose(gmap_pose, scan.header.stamp))
-     return false;
-
-  if(scan.ranges.size() != gsp_laser_beam_count_)
-    return false;
-
-  // GMapping wants an array of doubles...
-  double* ranges_double = new double[scan.ranges.size()];
-  // If the angle increment is negative, we have to invert the order of the readings.
-  if (do_reverse_range_)
-  {
-    ROS_DEBUG("Inverting scan");
-    int num_ranges = scan.ranges.size();
-    for(int i=0; i < num_ranges; i++)
-    {
-      // Must filter out short readings, because the mapper won't
-      if(scan.ranges[num_ranges - i - 1] < scan.range_min)
-        ranges_double[i] = (double)scan.range_max;
-      else
-        ranges_double[i] = (double)scan.ranges[num_ranges - i - 1];
-    }
-  } else
-  {
-    for(unsigned int i=0; i < scan.ranges.size(); i++)
-    {
-      // Must filter out short readings, because the mapper won't
-      if(scan.ranges[i] < scan.range_min)
-        ranges_double[i] = (double)scan.range_max;
-      else
-        ranges_double[i] = (double)scan.ranges[i];
-    }
-  }
-
-  GMapping::RangeReading reading(scan.ranges.size(),
-                                 ranges_double,
-                                 gsp_laser_,
-                                 scan.header.stamp.toSec());
-
-  // ...but it deep copies them in RangeReading constructor, so we don't
-  // need to keep our array around.
-  delete[] ranges_double;
-
-  reading.setPose(gmap_pose);//by now , gmap_pose is null *, will process in reading
-
-  /*
-  ROS_DEBUG("scanpose (%.3f): %.3f %.3f %.3f\n",
-            scan.header.stamp.toSec(),
-            gmap_pose.x,
-            gmap_pose.y,
-            gmap_pose.theta);
-            */
-  ROS_DEBUG("processing scan");
-
-  return gsp_->processScan(reading);
-}
-
-void GlGmapping::laserCallback(const sensor_msgs::LaserScan::ConstPtr& scan)
-{
-  laser_count_++;
-  if ((laser_count_ % throttle_scans_) != 0)
-    return;
-
-  static ros::Time last_map_update(0,0);
-
-  // We can't initialize the mapper until we've got the first scan
-  if(!got_first_scan_)
-  {
-    if(!initMapper(*scan))
-      return;
-    got_first_scan_ = true;
-  }
-
-  GMapping::OrientedPoint odom_pose;
-
-  if(addScan(*scan, odom_pose))
-  {
-    ROS_DEBUG("scan processed");
-
-    GMapping::OrientedPoint mpose = gsp_->getParticles()[gsp_->getBestParticleIndex()].pose;
-    ROS_DEBUG("new best pose: %.3f %.3f %.3f", mpose.x, mpose.y, mpose.theta);
-    ROS_DEBUG("odom pose: %.3f %.3f %.3f", odom_pose.x, odom_pose.y, odom_pose.theta);
-    ROS_DEBUG("correction: %.3f %.3f %.3f", mpose.x - odom_pose.x, mpose.y - odom_pose.y, mpose.theta - odom_pose.theta);
-
-    tf::Transform laser_to_map = tf::Transform(tf::createQuaternionFromRPY(0, 0, mpose.theta), tf::Vector3(mpose.x, mpose.y, 0.0)).inverse();
-    tf::Transform odom_to_laser = tf::Transform(tf::createQuaternionFromRPY(0, 0, odom_pose.theta), tf::Vector3(odom_pose.x, odom_pose.y, 0.0));
-
-    map_to_odom_mutex_.lock();
-    map_to_odom_ = (odom_to_laser * laser_to_map).inverse();
-    map_to_odom_mutex_.unlock();
-
-    //if update done or arrived at a new interval ,will update the map
-    if(!got_map_ || (scan->header.stamp - last_map_update) > map_update_interval_)
-    {
-      updateMap(*scan);
-      last_map_update = scan->header.stamp;
-      ROS_DEBUG("Updated the map");
-    }
-  } else
-    ROS_DEBUG("cannot process scan");
-}
-
-double
-GlGmapping::computePoseEntropy()
-{
-  double weight_total=0.0;
-  for(std::vector<GMapping::GridSlamProcessor::Particle>::const_iterator it = gsp_->getParticles().begin();
-      it != gsp_->getParticles().end();
-      ++it)
-  {
-    weight_total += it->weight;
-  }
-  double entropy = 0.0;
-  for(std::vector<GMapping::GridSlamProcessor::Particle>::const_iterator it = gsp_->getParticles().begin();
-      it != gsp_->getParticles().end();
-      ++it)
-  {
-    if(it->weight/weight_total > 0.0)
-      entropy += it->weight/weight_total * log(it->weight/weight_total);
-  }
-  return -entropy;
-}
-
-void
-GlGmapping::updateMap(const sensor_msgs::LaserScan& scan)
-{
-  ROS_INFO("OOOOOOOOOOOOOOOO");
   ROS_DEBUG("Update map");
   boost::mutex::scoped_lock map_lock (map_mutex_);
   GMapping::ScanMatcher matcher;
@@ -658,7 +458,7 @@ GlGmapping::updateMap(const sensor_msgs::LaserScan& scan)
   GMapping::GridSlamProcessor::Particle best =
           gsp_->getParticles()[gsp_->getBestParticleIndex()];
   std_msgs::Float64 entropy;
-  entropy.data = computePoseEntropy();
+  entropy.data = computePoseEntropy();//*计算位姿的信息熵*/ no use
   if(entropy.data > 0.0)
     entropy_publisher_.publish(entropy);
 
@@ -750,9 +550,8 @@ GlGmapping::updateMap(const sensor_msgs::LaserScan& scan)
   sstm_.publish(map_.map.info);
 }
 
-bool
-GlGmapping::mapCallback(nav_msgs::GetMap::Request  &req,
-                          nav_msgs::GetMap::Response &res)
+//return map to ros
+bool GlGmapping::mapServiceCallback(nav_msgs::GetMap::Request &req, nav_msgs::GetMap::Response &res)
 {
   boost::mutex::scoped_lock map_lock (map_mutex_);
   if(got_map_ && map_.map.info.width && map_.map.info.height)
@@ -764,10 +563,40 @@ GlGmapping::mapCallback(nav_msgs::GetMap::Request  &req,
     return false;
 }
 
+// key :map_to_odom_
 void GlGmapping::publishTransform()
 {
   map_to_odom_mutex_.lock();
   ros::Time tf_expiration = ros::Time::now() + ros::Duration(tf_delay_);
   tfB_->sendTransform( tf::StampedTransform (map_to_odom_, tf_expiration, map_frame_, odom_frame_));
   map_to_odom_mutex_.unlock();
+}
+
+void GlGmapping::publishLoop(double transform_publish_period){
+  if(transform_publish_period == 0)
+    return;
+
+  ros::Rate r(1.0 / transform_publish_period);//20 hz
+  while(ros::ok()){
+    publishTransform();
+    r.sleep();
+  }
+}
+
+GlGmapping::~GlGmapping()
+{
+  if(transform_thread_){
+    transform_thread_->join();
+    delete transform_thread_;
+  }
+
+  delete gsp_;
+  if(gsp_laser_)
+    delete gsp_laser_;
+  if(gsp_odom_)
+    delete gsp_odom_;
+  if (scan_filter_)
+    delete scan_filter_;
+  if (scan_filter_sub_)
+    delete scan_filter_sub_;
 }

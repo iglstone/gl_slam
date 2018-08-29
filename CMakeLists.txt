@@ -6,16 +6,30 @@ find_package(catkin REQUIRED nav_msgs openslam_gmapping roscpp tf rosbag_storage
 find_package(Boost REQUIRED signals)
 
 include_directories(${Boost_INCLUDE_DIRS} ${catkin_INCLUDE_DIRS})
-
-include_directories(src)
+include_directories(src utils slam_core)
 
 catkin_package()
+
+catkin_package(
+  INCLUDE_DIRS include
+  LIBRARIES slam_core utils
+)
+
+add_subdirectory(slam_core)
+add_subdirectory(utils)
 
 add_executable(gl_gmapping src/gl_gmapping.cpp src/main.cpp)
 target_link_libraries(gl_gmapping ${Boost_LIBRARIES} ${catkin_LIBRARIES})
 if(catkin_EXPORTED_TARGETS)
   add_dependencies(gl_gmapping ${catkin_EXPORTED_TARGETS})
 endif()
+
+install(DIRECTORY include/
+  DESTINATION ${CATKIN_GLOBAL_INCLUDE_DESTINATION}
+  FILES_MATCHING PATTERN "*.h"
+                 PATTERN "*.hxx"
+  PATTERN ".svn" EXCLUDE
+)
 
 
 if(CATKIN_ENABLE_TESTING)
