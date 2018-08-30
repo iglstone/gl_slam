@@ -11,12 +11,11 @@ include_directories(src utils slam_core)
 catkin_package()
 
 catkin_package(
-  INCLUDE_DIRS include
-  LIBRARIES slam_core utils
+  #INCLUDE_DIRS include
+  LIBRARIES gl_utils gl_map gl_loc
 )
 
-add_subdirectory(slam_core)
-add_subdirectory(utils)
+add_subdirectory(gmapping_core)
 
 add_executable(gl_gmapping src/gl_gmapping.cpp src/main.cpp)
 target_link_libraries(gl_gmapping ${Boost_LIBRARIES} ${catkin_LIBRARIES})
